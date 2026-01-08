@@ -319,11 +319,4 @@ The bounded model can serve as a fallback when unconstrained solutions produce i
 - **Merton (1974)**: "On the Pricing of Corporate Debt: The Risk Structure of Interest Rates"
 - **Merton Model Calculator**: [Credit Risk Calculator](https://www.creditrisk.nathangs.ca/)
 
-## License
-
-[Add your license here]
-
-## Contact
-
-[Add contact information here]
 
