@@ -1,0 +1,152 @@
+================================================================================
+BOUNDED MODEL TUNING AND COMPARISON REPORT
+================================================================================
+
+Date: Generated after tuning bounds and regularization parameters
+
+PARAMETER TUNING SUMMARY
+================================================================================
+
+Initial Configuration:
+  σ_V bounds: [0.05, 0.80]
+  Leverage bounds: [0.10, 0.95]
+  Regularization: λ_σ=0.1, λ_V=0.1
+  Result: 36.6% of σ_V values hitting upper bound
+
+Tuned Configuration (Final):
+  σ_V bounds: [0.03, 1.2]
+  Leverage bounds: [0.05, 0.98]
+  Regularization: λ_σ=0.2, λ_V=0.2
+  Rationale: 
+    - Increased σ_V_max to 1.2 to reduce constraint binding
+    - Widened leverage bounds to allow more flexibility
+    - Increased regularization to improve stability
+
+COMPREHENSIVE MODEL COMPARISON RESULTS
+================================================================================
+
+1. PD STABILITY: Max |Δlog(PD)| per firm
+--------------------------------------------------------------------------------
+Firm     Naive           Improved        Bounded        
+--------------------------------------------------------------------------------
+AAPL     23.8956         2.3106          1.9568         ✓ Better than improved
+F        4.6042          0.2854          0.4598         ✗ Worse than improved
+JPM      28.4997         1.0871          5.1376         ✗ Much worse
+TSLA     9.9387          1.7569          2.5825         ✗ Worse
+XOM      31.5539         1.0767          3.3900         ✗ Much worse
+
+Summary: Bounded model shows mixed results - better for AAPL but worse for 
+         other firms compared to improved model. All models are significantly 
+         better than naive baseline.
+
+2. ASSET VALUE PLAUSIBILITY: V/E Ratio Statistics
+--------------------------------------------------------------------------------
+All models: n_V_invalid = 0
+All models maintain economically plausible asset values.
+
+3. RISK RANKING CONSISTENCY
+--------------------------------------------------------------------------------
+Metric                         Naive           Improved        Bounded        
+--------------------------------------------------------------------------------
+spearman_rho_median            0.700           0.700           0.300          ✗
+wrong_sign_pct                 17.063          1.190           44.048          ✗
+top1_not_in_top2_PD_pct        0.794           0.397           29.762          ✗
+
+Summary: Bounded model shows POOR risk ranking performance:
+         - Negative correlation between PD and leverage (0.300 vs 0.700)
+         - 44% of days have wrong sign (vs 1.2% for improved)
+         - 29.8% failure rate for top-1 distress in top-2 PD (vs 0.4% for improved)
+
+4. SENSITIVITY: Median and p95 Elasticities
+--------------------------------------------------------------------------------
+
+Parameter    Metric     Naive           Improved        Bounded        
+--------------------------------------------------------------------------------
+sigma_E      median_abs 9.211           6.790           6.235          ✓ Best
+sigma_E      p95_abs    90.445          58.394          994.840        ✗ Worse p95
+D            median_abs 2.987           2.874           33.575          ✗ Much worse
+E            median_abs 2.922           2.893           32.523          ✗ Much worse
+T            median_abs 6.843           6.002           29.890          ✗ Much worse
+r            median_abs 2.777           2.747           2605.396        ✗ Extremely worse
+
+Summary: Bounded model shows:
+         - BEST median sensitivity to σ_E (6.235 vs 6.790 improved)
+         - MUCH WORSE sensitivity to other parameters, especially r (2605 vs 2.7)
+         - Note: Sensitivity calculation uses unconstrained calibration, which
+           may not accurately reflect bounded model behavior
+
+KEY FINDINGS
+================================================================================
+
+STRENGTHS:
+1. ✓ Bounded model successfully constrains σ_V to [0.03, 1.2] range
+2. ✓ Maintains plausible asset values (no invalid V)
+3. ✓ Best median sensitivity to σ_E (primary source of instability)
+4. ✓ Better PD stability for AAPL compared to improved model
+
+WEAKNESSES:
+1. ✗ Poor risk ranking consistency (44% wrong sign days vs 1.2% for improved)
+2. ✗ High sensitivity to r and other parameters (likely due to constraint binding)
+3. ✗ Mixed PD stability results across firms
+4. ✗ Risk ranking correlation drops to 0.300 (vs 0.700 for improved)
+
+ROOT CAUSE ANALYSIS
+================================================================================
+
+The bounded model's poor risk ranking performance suggests:
+
+1. CONSTRAINT BINDING: When optimization hits bounds, solutions may not fit 
+   the data well, leading to poor risk discrimination.
+
+2. REGULARIZATION TRADE-OFF: Increased regularization (λ=0.2) may be penalizing 
+   economically meaningful differences between firms.
+
+3. OPTIMIZATION ISSUES: The constrained optimization may be finding local 
+   minima that satisfy bounds but don't accurately reflect firm risk.
+
+4. SENSITIVITY CALCULATION LIMITATION: The sensitivity test uses unconstrained 
+   calibration, which doesn't reflect how bounded model responds to perturbations.
+
+RECOMMENDATIONS
+================================================================================
+
+1. FURTHER TUNING:
+   - Try adaptive bounds based on firm characteristics
+   - Experiment with different regularization schemes (e.g., firm-specific priors)
+   - Consider soft bounds with penalty functions instead of hard constraints
+
+2. ALTERNATIVE APPROACHES:
+   - Use bounded calibration only when unconstrained solution violates bounds
+   - Implement two-stage optimization: unconstrained first, then bounded if needed
+   - Consider Bayesian calibration with informative priors
+
+3. VALIDATION:
+   - Fix sensitivity calculation to use bounded calibration
+   - Test on additional datasets to verify robustness
+   - Compare against market-implied risk signals (CDS spreads, credit ratings)
+
+4. IMPLEMENTATION NOTES:
+   - Current bounded model enforces constraints but may sacrifice economic 
+     consistency for numerical stability
+   - Improved model (EWMA smoothing) provides better balance between stability 
+     and risk ranking accuracy
+
+CONCLUSION
+================================================================================
+
+The bounded calibration successfully enforces parameter bounds and reduces 
+sensitivity to equity volatility. However, it introduces significant issues 
+with risk ranking consistency, suggesting that hard constraints may be too 
+restrictive for accurate credit risk assessment.
+
+The improved model (EWMA smoothing with unconstrained calibration) provides 
+superior overall performance, achieving:
+- Better risk ranking (1.2% wrong sign vs 44% for bounded)
+- More balanced sensitivity across parameters
+- Better PD stability for most firms
+
+RECOMMENDATION: Use improved model for production, with bounded calibration 
+as a fallback option when unconstrained solutions produce implausible parameters.
+
+================================================================================
+

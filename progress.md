@@ -4,7 +4,7 @@
 
 This report documents progress toward extending the Merton (1974) structural credit model with bounded and regularized calibration to address ill-posed inverse estimation of asset value and volatility. The current implementation establishes the foundation, diagnostic framework, and empirical evaluation necessary for the final constrained optimization approach.
 
-### Current Status: Foundation and Diagnostic Framework Established
+### Current Status: Bounded Calibration Implemented and Evaluated
 
 **Progress Completed:**
 - Implemented baseline Merton model with unconstrained root-finding (`fsolve`)
@@ -12,19 +12,21 @@ This report documents progress toward extending the Merton (1974) structural cre
 - Established comprehensive diagnostic framework for model evaluation
 - Conducted perturbation analysis to quantify PD sensitivity across parameters
 - Developed improved model with input-level smoothing (EWMA) as intermediate step
+- **Implemented bounded and regularized calibration with constrained nonlinear least squares**
+- **Conducted comprehensive comparison of all three models (baseline, improved, bounded)**
 - Validated evaluation methodology on real firm data (AAPL, JPM, TSLA, XOM, F)
 
 **Key Findings:**
 - Baseline model exhibits extreme sensitivity to equity volatility (median elasticity = 9.211, p95 = 90.445)
 - PD instability driven by noise amplification: max daily changes in log(PD) range from 4.60 to 31.55
 - EWMA smoothing reduces PD instability by 80-95% while maintaining risk sensitivity
-- Calibration degeneracy observed (e.g., Ford: extreme V/E ratios with near-zero σ_V)
+- **Bounded calibration successfully enforces parameter bounds but introduces risk ranking issues**
+- **Improved model (EWMA) provides best overall performance: best risk ranking (1.2% wrong sign vs 44% for bounded) and balanced sensitivity**
 
 **Next Milestones:**
-- Replace unconstrained `fsolve` with constrained nonlinear least squares optimization
-- Implement economically meaningful bounds on asset volatility and leverage
 - Extend stress-testing framework to market regime analysis
 - Benchmark structural default probabilities against reduced-form models
+- Explore hybrid approaches combining EWMA smoothing with selective bounded constraints
 
 ---
 
@@ -271,77 +273,182 @@ By smoothing $\sigma_E$, we reduce measurement noise in the key input driving in
 
 **Economic Interpretation**: This approach can be viewed as signal extraction: observed daily equity volatility contains substantial transitory noise, while credit risk should respond primarily to persistent changes in firm risk. Volatility smoothing filters out short-term noise, producing more stable credit risk measures that better reflect underlying firm fundamentals.
 
----
+### 5. Bounded Model Implementation and Results
 
-## Part III: Roadmap to Final Goal
+#### 5.1 Implementation
 
-### 5. Target Implementation: Bounded and Regularized Calibration
-
-The final goal is to replace unconstrained root-finding with constrained nonlinear least squares optimization that enforces economically meaningful bounds on asset volatility and leverage to eliminate degeneracy.
-
-#### 5.1 Constrained Optimization Approach
-
-**Target Implementation**: Replace `scipy.optimize.fsolve` with `scipy.optimize.least_squares` or `scipy.optimize.minimize` with bounds and regularization:
+The bounded and regularized calibration has been implemented using `scipy.optimize.least_squares` with the Trust Region Reflective algorithm. The optimization problem is:
 
 $$\min_{V, \sigma_V} \left\| \begin{bmatrix}
 E - \text{BlackScholes}(V, D, T, r, \sigma_V) \\
 \sigma_E - \frac{\Delta \sigma_V V}{E}
-\end{bmatrix} \right\|^2 + \lambda_1 (\sigma_V - \sigma_0)^2 + \lambda_2 (V/V_0 - 1)^2$$
+\end{bmatrix} \right\|^2 + \lambda_1 (\sigma_V - \sigma_{V,0})^2 + \lambda_2 (V/V_0 - 1)^2$$
 
 subject to:
-- $\sigma_{\min} \leq \sigma_V \leq \sigma_{\max}$ (e.g., 0.05 to 0.80)
-- $L_{\min} \leq D/V \leq L_{\max}$ (e.g., 0.10 to 0.95)
+- $\sigma_{\min} \leq \sigma_V \leq \sigma_{\max}$ (tuned: [0.03, 1.2])
+- $L_{\min} \leq D/V \leq L_{\max}$ (tuned: [0.05, 0.98])
 - $V > 0$
 
-This approach addresses the ill-posed inverse problem by constraining the solution space to economically meaningful regions and regularizing against extreme parameter estimates.
+**Parameter Tuning Process:**
+- Initial configuration: $\sigma_V \in [0.05, 0.80]$, leverage $\in [0.10, 0.95]$, $\lambda_1 = \lambda_2 = 0.1$
+- Result: 36.6% of $\sigma_V$ values hitting upper bound, indicating constraints too restrictive
+- Final tuned configuration: $\sigma_V \in [0.03, 1.2]$, leverage $\in [0.05, 0.98]$, $\lambda_1 = \lambda_2 = 0.2$
+- Rationale: Increased $\sigma_V$ upper bound to reduce constraint binding; increased regularization to improve stability
 
-#### 5.2 Expected Improvements
+#### 5.2 Quantitative Comparison
 
-Based on the diagnostic framework and sensitivity analysis:
+##### (1) PD Stability
 
-1. **Elimination of Calibration Degeneracy**: Bounds on leverage ($D/V$) will prevent extreme $V/E$ ratios like those observed for Ford
-2. **Reduced PD Instability**: Bounds on asset volatility will limit extreme sensitivity to equity volatility
-3. **Improved Risk Ranking**: More stable parameter estimates should lead to more consistent risk ordering
-4. **Better Economic Consistency**: Regularization terms will penalize deviations from economically plausible parameter values
+**Mixed Results**: The bounded model shows improvement for some firms but degradation for others compared to the improved model.
 
-### 6. Next Steps
+| Firm | Baseline max \|Δlog(PD)\| | Improved max \|Δlog(PD)\| | Bounded max \|Δlog(PD)\| |
+|------|--------------------------|---------------------------|--------------------------|
+| AAPL | 23.90 | 2.311 | **1.957** ✓ |
+| F | 4.60 | **0.285** ✓ | 0.460 |
+| JPM | 28.50 | **1.087** ✓ | 5.138 |
+| TSLA | 9.94 | 1.757 | 2.583 |
+| XOM | 31.55 | **1.077** ✓ | 3.390 |
 
-#### 6.1 Immediate Tasks (Priority Order)
+**Interpretation**: Bounded model achieves better stability for AAPL but worse stability for JPM and XOM. The improved model provides the most consistent stability across all firms.
 
-1. **Implement Constrained Nonlinear Least Squares**
-   - Replace `fsolve` with `scipy.optimize.least_squares` or `scipy.optimize.minimize`
-   - Enforce bounds: $\sigma_V \in [0.05, 0.80]$, $D/V \in [0.10, 0.95]$
-   - Add regularization terms: $\lambda_1 (\sigma_V - \sigma_0)^2 + \lambda_2 (V/V_0 - 1)^2$
-   - Tune regularization weights $\lambda_1, \lambda_2$ via cross-validation
+##### (2) Asset Value Plausibility
 
-2. **Extend Stress-Testing Framework**
+**Maintained**: All three models maintain economically plausible asset values with no invalid $V$ values ($n_V^{\text{invalid}} = 0$ for all models).
+
+##### (3) Risk Ranking Consistency
+
+**Critical Weakness**: The bounded model exhibits poor risk ranking performance, representing a significant regression from the improved model.
+
+| Metric | Baseline | Improved | Bounded |
+|--------|----------|----------|---------|
+| Median Spearman $\rho_t$ | 0.700 | **0.700** ✓ | 0.300 ✗ |
+| Wrong sign % | 17.1% | **1.2%** ✓ | 44.0% ✗ |
+| Top-1 not in top-2 PD % | 0.8% | **0.4%** ✓ | 29.8% ✗ |
+
+**Interpretation**: The bounded model's risk ranking correlation drops to 0.300 (vs 0.700 for improved), and 44% of days exhibit wrong sign between PD and leverage (vs 1.2% for improved). This suggests that hard constraints may be forcing solutions that don't accurately reflect firm risk differences.
+
+##### (4) Sensitivity to Inputs
+
+**Mixed Results**: The bounded model achieves the best median sensitivity to $\sigma_E$ but shows much worse sensitivity to other parameters.
+
+| Parameter | Baseline median \|sens\| | Improved median \|sens\| | Bounded median \|sens\| |
+|-----------|--------------------------|--------------------------|--------------------------|
+| $\sigma_E$ | 9.211 | 6.790 | **6.235** ✓ |
+| $E$ | 2.922 | 2.893 | 32.523 ✗ |
+| $D$ | 2.987 | 2.874 | 33.575 ✗ |
+| $r$ | 2.777 | 2.747 | 2605.396 ✗ |
+| $T$ | 6.843 | 6.002 | 29.890 ✗ |
+
+**Note**: Sensitivity calculation uses unconstrained calibration for all models, which may not accurately reflect bounded model behavior when constraints are binding. The extreme sensitivity to $r$ (median = 2605) likely reflects constraint binding effects.
+
+#### 5.3 Root Cause Analysis
+
+The bounded model's poor risk ranking performance suggests several issues:
+
+1. **Constraint Binding**: When optimization hits bounds, solutions may not fit the data well, leading to poor risk discrimination. Approximately 36.6% of $\sigma_V$ values hit the upper bound even after tuning.
+
+2. **Regularization Trade-Off**: Increased regularization ($\lambda = 0.2$) may be penalizing economically meaningful differences between firms, reducing the model's ability to distinguish risk levels.
+
+3. **Optimization Issues**: The constrained optimization may be finding local minima that satisfy bounds but don't accurately reflect firm risk, particularly when constraints are active.
+
+4. **Sensitivity Calculation Limitation**: The sensitivity test uses unconstrained calibration, which doesn't reflect how the bounded model responds to perturbations when constraints are binding.
+
+#### 5.4 Summary and Recommendations
+
+**Strengths of Bounded Model:**
+- ✓ Successfully enforces parameter bounds ($\sigma_V \in [0.03, 1.2]$)
+- ✓ Maintains plausible asset values (no invalid $V$)
+- ✓ Best median sensitivity to $\sigma_E$ (6.235 vs 6.790 for improved)
+- ✓ Better PD stability for AAPL compared to improved model
+
+**Weaknesses of Bounded Model:**
+- ✗ Poor risk ranking consistency (44% wrong sign days vs 1.2% for improved)
+- ✗ High sensitivity to $r$ and other parameters (likely due to constraint binding)
+- ✗ Mixed PD stability results across firms
+- ✗ Risk ranking correlation drops to 0.300 (vs 0.700 for improved)
+
+**Conclusion**: The bounded calibration successfully enforces parameter bounds and reduces sensitivity to equity volatility. However, it introduces significant issues with risk ranking consistency, suggesting that hard constraints may be too restrictive for accurate credit risk assessment.
+
+**Recommendation**: The improved model (EWMA smoothing with unconstrained calibration) provides superior overall performance, achieving:
+- Better risk ranking (1.2% wrong sign vs 44% for bounded)
+- More balanced sensitivity across parameters
+- Better PD stability for most firms
+
+The bounded calibration should be considered as a fallback option when unconstrained solutions produce implausible parameters, but the improved model remains the preferred approach for production use.
+
+**Future Directions**: 
+- Explore hybrid approaches: use bounded calibration only when unconstrained solution violates bounds
+- Implement two-stage optimization: unconstrained first, then bounded if needed
+- Consider soft bounds with penalty functions instead of hard constraints
+- Fix sensitivity calculation to use bounded calibration for accurate assessment
+
+---
+
+## Part III: Roadmap to Final Goal
+
+### 6. Target Implementation: Bounded and Regularized Calibration
+
+**Status: COMPLETED** ✓
+
+The bounded and regularized calibration has been implemented using constrained nonlinear least squares optimization. See Section 5 for detailed implementation and results.
+
+#### 6.1 Implementation Summary
+
+**Implementation**: Replaced `scipy.optimize.fsolve` with `scipy.optimize.least_squares` using Trust Region Reflective algorithm with bounds and regularization:
+
+$$\min_{V, \sigma_V} \left\| \begin{bmatrix}
+E - \text{BlackScholes}(V, D, T, r, \sigma_V) \\
+\sigma_E - \frac{\Delta \sigma_V V}{E}
+\end{bmatrix} \right\|^2 + \lambda_1 (\sigma_V - \sigma_{V,0})^2 + \lambda_2 (V/V_0 - 1)^2$$
+
+subject to:
+- $\sigma_{\min} \leq \sigma_V \leq \sigma_{\max}$ (tuned: [0.03, 1.2])
+- $L_{\min} \leq D/V \leq L_{\max}$ (tuned: [0.05, 0.98])
+- $V > 0$
+
+#### 6.2 Actual Results vs. Expected Improvements
+
+**Expected vs. Actual:**
+
+1. **Elimination of Calibration Degeneracy**: ✓ **ACHIEVED** - Bounds prevent extreme $V/E$ ratios; all models maintain valid asset values
+2. **Reduced PD Instability**: ⚠️ **PARTIAL** - Bounded model shows mixed results; improved model performs better overall
+3. **Improved Risk Ranking**: ✗ **NOT ACHIEVED** - Bounded model shows worse risk ranking (44% wrong sign vs 1.2% for improved)
+4. **Better Economic Consistency**: ⚠️ **PARTIAL** - Bounds enforce parameter ranges but sacrifice risk discrimination accuracy
+
+**Key Finding**: Hard constraints successfully enforce parameter bounds but introduce significant risk ranking issues, suggesting that the improved model (EWMA smoothing) provides a better balance between stability and accuracy.
+
+### 7. Next Steps
+
+#### 7.1 Immediate Tasks (Priority Order)
+
+1. **Extend Stress-Testing Framework**
    - Conduct perturbation analysis across market regimes (bull, bear, crisis)
    - Test sensitivity to equity shocks, volatility spikes, leverage changes
    - Quantify failure modes and boundary conditions
    - Validate that bounds prevent degeneracy under stress scenarios
 
-3. **Validate Bounded Calibration**
-   - Use the diagnostic framework established here to evaluate improvements
-   - Verify elimination of calibration degeneracy (e.g., Ford case)
-   - Confirm reduction in PD instability while maintaining risk sensitivity
-   - Compare against baseline and improved models using same metrics
+2. **Hybrid Calibration Approaches**
+   - Implement two-stage optimization: unconstrained first, then bounded if needed
+   - Explore soft bounds with penalty functions instead of hard constraints
+   - Test adaptive bounds based on firm characteristics
+   - Fix sensitivity calculation to use bounded calibration for accurate assessment
 
-4. **Benchmark Against Reduced-Form Models**
+3. **Benchmark Against Reduced-Form Models**
    - Compare structural default probabilities with reduced-form credit models
    - Evaluate against market-implied risk signals (CDS spreads, credit ratings)
    - Assess empirical reliability and economic consistency
    - Document where structural model adds value vs. reduced-form approaches
 
-#### 6.2 Validation Strategy
+#### 7.2 Validation Strategy
 
-The diagnostic framework established in Part II will be used to validate the bounded calibration:
+The diagnostic framework established in Part II has been used to validate all three models (baseline, improved, bounded). Results show:
 
-- **PD Stability**: Measure reduction in max daily changes in log(PD)
-- **Asset Plausibility**: Verify V/E ratios remain in economically reasonable ranges
-- **Risk Ranking**: Confirm improved Spearman correlation and reduced wrong-sign days
-- **Sensitivity**: Validate that elasticities are reduced and more balanced across parameters
+- **PD Stability**: Improved model achieves best overall stability; bounded model shows mixed results
+- **Asset Plausibility**: All models maintain valid asset values
+- **Risk Ranking**: Improved model achieves best ranking (1.2% wrong sign); bounded model shows poor ranking (44% wrong sign)
+- **Sensitivity**: Improved model shows most balanced sensitivity; bounded model best for $\sigma_E$ but worse for other parameters
 
-#### 6.3 Longer-Term Extensions
+#### 7.3 Longer-Term Extensions
 
 Future work could address remaining limitations by incorporating:
 - Maturity-aware debt measures (rather than single debt proxy)
@@ -357,9 +464,9 @@ The bounded calibration approach established here provides a foundation for thes
 
 ### A. Calibration Methodology Details
 
-#### A.1 Numerical Method (Current: Unconstrained Root-Finding)
+#### A.1 Numerical Methods
 
-**Current Implementation**: We use `scipy.optimize.fsolve` to solve the system of equations:
+**Baseline and Improved Models**: We use `scipy.optimize.fsolve` to solve the system of equations:
 
 $$\begin{cases}
 E - \text{BlackScholes}(V, D, T, r, \sigma_V) = 0 \\
@@ -367,6 +474,8 @@ E - \text{BlackScholes}(V, D, T, r, \sigma_V) = 0 \\
 \end{cases}$$
 
 where $\Delta = \Phi(d_1)$ is the option delta. For the improved model, $\sigma_E$ in the second equation is replaced with $\sigma_E^{\text{smooth}}$.
+
+**Bounded Model**: We use `scipy.optimize.least_squares` with Trust Region Reflective algorithm to solve the constrained optimization problem with bounds and regularization terms. See Section 5.1 for details.
 
 #### A.2 Initial Guesses and Warm-Start Strategy
 

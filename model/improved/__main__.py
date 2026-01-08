@@ -1,23 +1,31 @@
 """
-Entry point for baseline Merton model.
+Entry point for improved Merton model.
 
-Run with: python -m improved
+Run with: 
+  python -m improved                    # Uses unconstrained calibration (fsolve)
+  python -m improved --bounded          # Uses bounded calibration with regularization
 """
 
 import sys
+import argparse
 import pandas as pd
 import numpy as np
 from pathlib import Path
 
+# Set matplotlib to use non-interactive backend before importing
+import matplotlib
+matplotlib.use('Agg')
+
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from improved.calibration import calibrate_asset_parameters
+from improved.calibration import calibrate_asset_parameters, calibrate_asset_parameters_bounded
 from improved.risk_measures import compute_risk_measures
 from improved.smoothing import smooth_equity_volatility, plot_smoothed_volatility
 
 
-def main():
+def main(use_bounded=False, sigma_V_min=0.05, sigma_V_max=0.80, 
+         leverage_min=0.10, leverage_max=0.95, lambda_sigma=0.1, lambda_V=0.1):
     """
     Main entry point for baseline model.
     
@@ -137,7 +145,21 @@ def main():
             
             try:
                 # Calibrate using total values (E and D both in millions)
-                V, sigma_V = calibrate_asset_parameters(E, sigma_E_smooth, D, T, r, V0=V0, sigma_V0=sigma_V0)
+                if use_bounded:
+                    V, sigma_V = calibrate_asset_parameters_bounded(
+                        E, sigma_E_smooth, D, T, r, 
+                        V0=V0, sigma_V0=sigma_V0,
+                        sigma_V_min=sigma_V_min,
+                        sigma_V_max=sigma_V_max,
+                        leverage_min=leverage_min,
+                        leverage_max=leverage_max,
+                        lambda_sigma=lambda_sigma,
+                        lambda_V=lambda_V,
+                        sigma_V_prior=sigma_V_prev if sigma_V_prev is not None else None,
+                        V_prior=V_prev if V_prev is not None else None
+                    )
+                else:
+                    V, sigma_V = calibrate_asset_parameters(E, sigma_E_smooth, D, T, r, V0=V0, sigma_V0=sigma_V0)
                 
                 # Update previous solution for next iteration
                 V_prev = V
@@ -168,7 +190,17 @@ def main():
         print("No results generated. Check data quality.")
         return
     
-    output_file = output_dir / 'improved_results.csv'
+    # Determine output filename based on calibration method
+    if use_bounded:
+        output_file = output_dir / 'bounded_results.csv'
+        print(f"\nUsing bounded calibration with:")
+        print(f"  σ_V bounds: [{sigma_V_min}, {sigma_V_max}]")
+        print(f"  Leverage bounds: [{leverage_min}, {leverage_max}]")
+        print(f"  Regularization: λ_σ={lambda_sigma}, λ_V={lambda_V}")
+    else:
+        output_file = output_dir / 'improved_results.csv'
+        print(f"\nUsing unconstrained calibration (fsolve)")
+    
     results_df.to_csv(output_file, index=False)
     
     print(f"Results saved to {output_file}")
@@ -176,4 +208,30 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description='Run improved Merton model calibration')
+    parser.add_argument('--bounded', action='store_true', 
+                       help='Use bounded calibration with regularization')
+    parser.add_argument('--sigma-v-min', type=float, default=0.05,
+                       help='Minimum asset volatility bound (default: 0.05)')
+    parser.add_argument('--sigma-v-max', type=float, default=0.80,
+                       help='Maximum asset volatility bound (default: 0.80)')
+    parser.add_argument('--leverage-min', type=float, default=0.10,
+                       help='Minimum leverage (D/V) bound (default: 0.10)')
+    parser.add_argument('--leverage-max', type=float, default=0.95,
+                       help='Maximum leverage (D/V) bound (default: 0.95)')
+    parser.add_argument('--lambda-sigma', type=float, default=0.1,
+                       help='Regularization weight for sigma_V (default: 0.1)')
+    parser.add_argument('--lambda-v', type=float, default=0.1,
+                       help='Regularization weight for V (default: 0.1)')
+    
+    args = parser.parse_args()
+    
+    main(
+        use_bounded=args.bounded,
+        sigma_V_min=args.sigma_v_min,
+        sigma_V_max=args.sigma_v_max,
+        leverage_min=args.leverage_min,
+        leverage_max=args.leverage_max,
+        lambda_sigma=args.lambda_sigma,
+        lambda_V=args.lambda_v
+    )

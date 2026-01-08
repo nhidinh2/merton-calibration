@@ -32,16 +32,13 @@ def distance_to_default(V, D, T, r, sigma_V):
     Returns:
     --------
     float
-        Distance-to-default (DD = -d2)
+        Distance-to-default 
     """
     if T <= 0 or sigma_V <= 0 or V <= 0 or D <= 0:
         if T <= 0:
             return float('inf') if V > D else float('-inf')
         else:
             return float('inf') if V > D else float('-inf')
-    
-    # Merton model: DD = -d2
-    # where d2 = (ln(V/D) + (r - 0.5*σ²)*T) / (σ*√T)
     d2 = (np.log(V / D) + (r - 0.5 * sigma_V**2) * T) / (sigma_V * np.sqrt(T))
     DD = -d2
     
